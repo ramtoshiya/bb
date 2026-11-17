@@ -13,11 +13,8 @@ import {
   PromptMentionPill,
   resolveThreadMentionResource,
 } from "@/components/thread/timeline/ConversationMessageMentions.js";
+import { isBoundedMentionToken } from "@/components/thread/mention-token-boundary.js";
 import {
-  isMentionBoundary,
-  isIdMentionEndBoundary,
-  isRawThreadIdBoundary,
-  isRawThreadIdEndBoundary,
   useRawThreadMentionResource,
   useSidebarThreadMentionResource,
   useThreadMentionResource,
@@ -28,11 +25,9 @@ const THREAD_MENTION_PATTERN = new RegExp(
   `@thread:([A-Za-z0-9_-]+)(?:#msg=(0|[1-9]\\d*))?|(${RAW_THREAD_ID_PATTERN_SOURCE})`,
   "gu",
 );
-const MESSAGE_SUFFIX_PATTERN = /^#msg=(0|[1-9]\d*)/u;
 const RAW_THREAD_ID_PATTERN = new RegExp(RAW_THREAD_ID_PATTERN_SOURCE, "gu");
 const CHARACTER_REFERENCE_PATTERN = /&(?:#\d+|#x[\da-f]+|[a-z][a-z\d]*);/iu;
 const THREAD_MENTION_PREFIX = "@thread";
-const THREAD_MENTION_ID_PATTERN = /^[A-Za-z0-9_-]+/u;
 
 const THREAD_MENTION_HAST_NAME = "bb-thread-mention";
 const THREAD_MENTION_THREAD_ID_PROPERTY = "dataThreadId";
@@ -121,21 +116,19 @@ function splitTextNodeOnMentions(
     const messageSeq = match[2] ?? null;
     const rawThreadId = match[3];
     const threadId = serializedThreadId ?? rawThreadId;
-    const matchEnd = match.index + match[0].length;
-    const boundaryText = rawThreadId === undefined ? value : context?.text;
+    const boundaryText =
+      rawThreadId === undefined ? value : (context?.text ?? value);
     const boundaryStart =
       rawThreadId === undefined
         ? match.index
         : (context?.offset ?? 0) + match.index;
-    const boundaryEnd = boundaryStart + match[0].length;
     if (
       threadId === undefined ||
-      !(rawThreadId === undefined
-        ? isMentionBoundary(value, match.index)
-        : isRawThreadIdBoundary(boundaryText ?? value, boundaryStart)) ||
-      !(rawThreadId === undefined
-        ? isIdMentionEndBoundary(value, matchEnd)
-        : isRawThreadIdEndBoundary(boundaryText ?? value, boundaryEnd))
+      !isBoundedMentionToken(
+        boundaryText,
+        boundaryStart,
+        boundaryStart + match[0].length,
+      )
     ) {
       return null;
     }
@@ -214,10 +207,7 @@ export function splitRawThreadIdsInText(
   let match: RegExpExecArray | null;
   while ((match = RAW_THREAD_ID_PATTERN.exec(text)) !== null) {
     const matchEnd = match.index + match[0].length;
-    if (
-      !isRawThreadIdBoundary(text, match.index) ||
-      !isRawThreadIdEndBoundary(text, matchEnd)
-    ) {
+    if (!isBoundedMentionToken(text, match.index, matchEnd)) {
       continue;
     }
     if (match.index > cursor) {
@@ -238,27 +228,35 @@ export function splitRawThreadIdsInText(
   return segments;
 }
 
-function directiveMessageSuffix(
-  parent: Parent,
-  index: number,
-): { messageSeq: string; length: number } | null {
-  const next = parent.children[index + 1];
-  const match =
-    next?.type === "text" ? MESSAGE_SUFFIX_PATTERN.exec(next.value) : null;
-  return match === null || match[1] === undefined
-    ? null
-    : { messageSeq: match[1], length: match[0].length };
-}
-
-function isDirectiveMentionEndBoundary(
-  parent: Parent,
-  index: number,
-  suffixLength: number,
-): boolean {
-  const next = parent.children[index + 1];
-  return (
-    next?.type !== "text" || isIdMentionEndBoundary(next.value, suffixLength)
-  );
+function inlineBareThreadMentionDirectives(tree: Nodes): void {
+  visit(tree, (node, index, parent: Parent | undefined) => {
+    const directive = parseTextDirective(node);
+    if (
+      directive === null ||
+      index === undefined ||
+      index === 0 ||
+      parent === undefined ||
+      !isUndecoratedTextDirective(directive)
+    ) {
+      return;
+    }
+    const previous = parent.children[index - 1];
+    if (
+      previous?.type !== "text" ||
+      !previous.value.endsWith(THREAD_MENTION_PREFIX)
+    ) {
+      return;
+    }
+    const next = parent.children[index + 1];
+    const merged = next?.type === "text" ? next : undefined;
+    previous.value += `:${directive.name}${merged?.value ?? ""}`;
+    const end = (merged ?? node).position?.end;
+    if (previous.position !== undefined && end !== undefined) {
+      previous.position = { ...previous.position, end };
+    }
+    parent.children.splice(index, merged === undefined ? 1 : 2);
+    return index;
+  });
 }
 
 function markdownMayContainThreadMention(markdown: string): boolean {
@@ -282,6 +280,7 @@ export function remarkThreadMentions() {
     ) {
       return;
     }
+    inlineBareThreadMentionDirectives(tree);
     const authoredMarkdownLinkNodes = collectAuthoredMarkdownLinkNodes(tree);
     const phrasingTextContexts = collectPhrasingTextContexts(tree);
     visit(
@@ -293,12 +292,9 @@ export function remarkThreadMentions() {
           index === undefined ||
           authoredMarkdownLinkNodes.has(node) ||
           !isRawThreadId(node.value) ||
-          !isRawThreadIdBoundary(
+          !isBoundedMentionToken(
             phrasingTextContexts.get(node)?.text ?? node.value,
             phrasingTextContexts.get(node)?.offset ?? 0,
-          ) ||
-          !isRawThreadIdEndBoundary(
-            phrasingTextContexts.get(node)?.text ?? node.value,
             (phrasingTextContexts.get(node)?.offset ?? 0) + node.value.length,
           )
         ) {
@@ -334,77 +330,6 @@ export function remarkThreadMentions() {
       }
       parent.children.splice(index, 1, ...replacements);
       return index + replacements.length;
-    });
-    visit(tree, (node, index, parent: Parent | undefined) => {
-      const directive = parseTextDirective(node);
-      if (
-        directive === null ||
-        index === undefined ||
-        index === 0 ||
-        parent === undefined ||
-        !isUndecoratedTextDirective(directive)
-      ) {
-        return;
-      }
-      const threadId = THREAD_MENTION_ID_PATTERN.exec(directive.name)?.[0];
-      if (threadId === undefined) {
-        return;
-      }
-      const previous = parent.children[index - 1];
-      if (previous?.type !== "text") {
-        return;
-      }
-      const prefixStart = previous.value.length - THREAD_MENTION_PREFIX.length;
-      if (prefixStart < 0 || !previous.value.endsWith(THREAD_MENTION_PREFIX)) {
-        return;
-      }
-      const trailingName = directive.name.slice(threadId.length);
-      const messageSuffix =
-        trailingName === "" ? directiveMessageSuffix(parent, index) : null;
-      if (
-        !isMentionBoundary(previous.value, prefixStart) ||
-        !(trailingName === ""
-          ? isDirectiveMentionEndBoundary(
-              parent,
-              index,
-              messageSuffix?.length ?? 0,
-            )
-          : isIdMentionEndBoundary(trailingName, 0)) ||
-        authoredMarkdownLinkNodes.has(node)
-      ) {
-        const leadingText = previous.value.slice(0, prefixStart);
-        const mentionText: Text = {
-          type: "text",
-          value: `${THREAD_MENTION_PREFIX}:${directive.name}`,
-        };
-        if (leadingText.length === 0) {
-          parent.children.splice(index - 1, 2, mentionText);
-          return index;
-        }
-        previous.value = leadingText;
-        parent.children.splice(index, 1, mentionText);
-        return index + 1;
-      }
-      previous.value = previous.value.slice(0, prefixStart);
-      const next = parent.children[index + 1];
-      if (messageSuffix !== null && next?.type === "text") {
-        next.value = next.value.slice(messageSuffix.length);
-      }
-      const mention = threadMentionNode({
-        threadId,
-        messageSeq: messageSuffix?.messageSeq ?? null,
-        rawThreadId: false,
-        rawThreadInlineCode: false,
-      });
-      if (trailingName === "") {
-        parent.children.splice(index, 1, mention);
-        return index + 1;
-      }
-      parent.children.splice(index, 1, mention, {
-        type: "text",
-        value: trailingName,
-      });
-      return index + 2;
     });
   };
 }

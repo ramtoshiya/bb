@@ -3,6 +3,7 @@ import { makeThreadListEntry } from "@bb/test-helpers/domain-fixtures";
 import {
   buildThreadTitleMentionResources,
   EMPTY_TITLE_MENTION_RESOURCES,
+  resolveSerializedPromptMentions,
   resolveThreadTitleDisplayText,
   type ThreadTitleMentionNavigationSource,
 } from "./ThreadTitleMentions";
@@ -155,6 +156,7 @@ describe("resolveThreadTitleDisplayText before Korean text", () => {
   const resources = {
     ...EMPTY_TITLE_MENTION_RESOURCES,
     projectNamesById: new Map([["proj_app", "App"]]),
+    sectionNamesById: new Map([["sec_1", "Backlog"]]),
     threadById: new Map([
       [
         "thr_app",
@@ -170,12 +172,27 @@ describe("resolveThreadTitleDisplayText before Korean text", () => {
   it.each([
     ["a thread mention", "@thread:thr_app는 확인", "Ship it는 확인"],
     ["a project mention", "@project:proj_app에서 확인", "App에서 확인"],
+    ["a section mention", "@section:sec_1에서 확인", "Backlog에서 확인"],
+    ["a folder mention", "@folder:sec_1로 이동", "Backlog로 이동"],
+    ["a message anchor", "@thread:thr_app#msg=42는", "Ship it#msg=42는"],
   ])(
     "shows %s followed by a Korean particle by name",
     (_label, title, expected) => {
       expect(resolveThreadTitleDisplayText(title, resources)).toBe(expected);
     },
   );
+
+  it("keeps the particle outside a prompt mention's range", () => {
+    expect(
+      resolveSerializedPromptMentions(
+        "😀 @thread:thr_app는 @project:proj_app에서",
+        resources,
+      ).map(({ start, end }) => [start, end]),
+    ).toEqual([
+      [3, 18],
+      [20, 37],
+    ]);
+  });
 
   it("keeps a directory mention followed by a Korean name literal", () => {
     expect(resolveThreadTitleDisplayText("@docs/설계 확인", resources)).toBe(
