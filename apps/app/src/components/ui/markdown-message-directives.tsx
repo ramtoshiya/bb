@@ -1,5 +1,5 @@
 import { createContext, useContext, type ReactNode } from "react";
-import type { Nodes, Paragraph, Parent, RootContent } from "mdast";
+import type { Nodes, Paragraph, Parent, RootContent, Text } from "mdast";
 import type {} from "mdast-util-to-hast";
 import type { PluginMessageDirectiveProps } from "@get-bb/plugin-sdk";
 import { SKIP, visit } from "unist-util-visit";
@@ -155,6 +155,10 @@ function messageDirectiveMountNode(index: number): RootContent {
   };
 }
 
+function isPlainText(node: RootContent | undefined): node is Text {
+  return node?.type === "text" && node.data === undefined;
+}
+
 function spliceLiteralDirective(
   parent: Parent,
   index: number,
@@ -171,10 +175,10 @@ function spliceLiteralDirective(
 
   const previous = parent.children[index - 1];
   const next = parent.children[index + 1];
-  if (previous?.type === "text") {
+  if (isPlainText(previous)) {
     previous.value += source;
     previous.position = undefined;
-    if (next?.type === "text") {
+    if (isPlainText(next)) {
       previous.value += next.value;
       parent.children.splice(index, 2);
     } else {
@@ -182,7 +186,7 @@ function spliceLiteralDirective(
     }
     return index;
   }
-  if (next?.type === "text") {
+  if (isPlainText(next)) {
     next.value = `${source}${next.value}`;
     next.position = undefined;
     parent.children.splice(index, 1);
