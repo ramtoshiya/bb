@@ -1059,6 +1059,10 @@ describe("MarkdownPreview thread mentions", () => {
     ["an unknown thread", "@thread:thr_zzzzzzzzzz"],
     ["a malformed thread id", "@thread:not-a-thread"],
     ["a known raw thread id", "thr_dcwivn5n8w"],
+    [
+      "an authored link around a known thread",
+      "[@thread:thr_dcwivn5n8w](https://example.com)",
+    ],
     ["a known raw-id inline-code span", "`thr_dcwivn5n8w`"],
   ])(
     "renders %s before a Korean particle as it does before a space",
