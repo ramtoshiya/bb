@@ -15,7 +15,7 @@ import {
 } from "@/components/thread/timeline/ConversationMessageMentions.js";
 import {
   isMentionBoundary,
-  isMentionEndBoundary,
+  isIdMentionEndBoundary,
   isRawThreadIdBoundary,
   isRawThreadIdEndBoundary,
   useRawThreadMentionResource,
@@ -32,7 +32,7 @@ const MESSAGE_SUFFIX_PATTERN = /^#msg=(0|[1-9]\d*)/u;
 const RAW_THREAD_ID_PATTERN = new RegExp(RAW_THREAD_ID_PATTERN_SOURCE, "gu");
 const CHARACTER_REFERENCE_PATTERN = /&(?:#\d+|#x[\da-f]+|[a-z][a-z\d]*);/iu;
 const THREAD_MENTION_PREFIX = "@thread";
-const THREAD_MENTION_ID_PATTERN = /^[A-Za-z0-9_-]+$/u;
+const THREAD_MENTION_ID_PATTERN = /^[A-Za-z0-9_-]+/u;
 
 const THREAD_MENTION_HAST_NAME = "bb-thread-mention";
 const THREAD_MENTION_THREAD_ID_PROPERTY = "dataThreadId";
@@ -134,7 +134,7 @@ function splitTextNodeOnMentions(
         ? isMentionBoundary(value, match.index)
         : isRawThreadIdBoundary(boundaryText ?? value, boundaryStart)) ||
       !(rawThreadId === undefined
-        ? isMentionEndBoundary(value, matchEnd)
+        ? isIdMentionEndBoundary(value, matchEnd)
         : isRawThreadIdEndBoundary(boundaryText ?? value, boundaryEnd))
     ) {
       return null;
@@ -257,7 +257,7 @@ function isDirectiveMentionEndBoundary(
 ): boolean {
   const next = parent.children[index + 1];
   return (
-    next?.type !== "text" || isMentionEndBoundary(next.value, suffixLength)
+    next?.type !== "text" || isIdMentionEndBoundary(next.value, suffixLength)
   );
 }
 
@@ -342,9 +342,12 @@ export function remarkThreadMentions() {
         index === undefined ||
         index === 0 ||
         parent === undefined ||
-        !isUndecoratedTextDirective(directive) ||
-        !THREAD_MENTION_ID_PATTERN.test(directive.name)
+        !isUndecoratedTextDirective(directive)
       ) {
+        return;
+      }
+      const threadId = THREAD_MENTION_ID_PATTERN.exec(directive.name)?.[0];
+      if (threadId === undefined) {
         return;
       }
       const previous = parent.children[index - 1];
@@ -355,14 +358,18 @@ export function remarkThreadMentions() {
       if (prefixStart < 0 || !previous.value.endsWith(THREAD_MENTION_PREFIX)) {
         return;
       }
-      const messageSuffix = directiveMessageSuffix(parent, index);
+      const trailingName = directive.name.slice(threadId.length);
+      const messageSuffix =
+        trailingName === "" ? directiveMessageSuffix(parent, index) : null;
       if (
         !isMentionBoundary(previous.value, prefixStart) ||
-        !isDirectiveMentionEndBoundary(
-          parent,
-          index,
-          messageSuffix?.length ?? 0,
-        ) ||
+        !(trailingName === ""
+          ? isDirectiveMentionEndBoundary(
+              parent,
+              index,
+              messageSuffix?.length ?? 0,
+            )
+          : isIdMentionEndBoundary(trailingName, 0)) ||
         authoredMarkdownLinkNodes.has(node)
       ) {
         const leadingText = previous.value.slice(0, prefixStart);
@@ -383,17 +390,21 @@ export function remarkThreadMentions() {
       if (messageSuffix !== null && next?.type === "text") {
         next.value = next.value.slice(messageSuffix.length);
       }
-      parent.children.splice(
-        index,
-        1,
-        threadMentionNode({
-          threadId: directive.name,
-          messageSeq: messageSuffix?.messageSeq ?? null,
-          rawThreadId: false,
-          rawThreadInlineCode: false,
-        }),
-      );
-      return index + 1;
+      const mention = threadMentionNode({
+        threadId,
+        messageSeq: messageSuffix?.messageSeq ?? null,
+        rawThreadId: false,
+        rawThreadInlineCode: false,
+      });
+      if (trailingName === "") {
+        parent.children.splice(index, 1, mention);
+        return index + 1;
+      }
+      parent.children.splice(index, 1, mention, {
+        type: "text",
+        value: trailingName,
+      });
+      return index + 2;
     });
   };
 }
