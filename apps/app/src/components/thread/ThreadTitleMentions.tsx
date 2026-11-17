@@ -454,18 +454,33 @@ export function isRawThreadIdBoundary(text: string, index: number): boolean {
   );
 }
 
-export function isMentionEndBoundary(text: string, index: number): boolean {
+const PATH_MENTION_CONTINUATION = /[\p{L}\p{N}_.+\/-]/u;
+const ID_MENTION_CONTINUATION = /[A-Za-z\p{N}_.+\/-]/u;
+
+function isMentionEndBoundary(
+  text: string,
+  index: number,
+  continuation: RegExp,
+): boolean {
   const next = text[index];
   if (next === undefined) return true;
   if (next === ".") {
     const afterPeriod = text[index + 1];
     return afterPeriod === undefined || /[\s,;:!?)}\]"'’”]/u.test(afterPeriod);
   }
-  return !/[\p{L}\p{N}_.+\/-]/u.test(next);
+  return !continuation.test(next);
+}
+
+function isPathMentionEndBoundary(text: string, index: number): boolean {
+  return isMentionEndBoundary(text, index, PATH_MENTION_CONTINUATION);
+}
+
+export function isIdMentionEndBoundary(text: string, index: number): boolean {
+  return isMentionEndBoundary(text, index, ID_MENTION_CONTINUATION);
 }
 
 export function isRawThreadIdEndBoundary(text: string, index: number): boolean {
-  return text[index] !== "\\" && isMentionEndBoundary(text, index);
+  return text[index] !== "\\" && isIdMentionEndBoundary(text, index);
 }
 
 function hasUnsupportedPathContinuation(text: string, index: number): boolean {
@@ -601,16 +616,19 @@ function threadTitleTextSegments(
     const token = match[0];
     const matchEnd = match.index + token.length;
     const rawThreadId = isRawThreadId(token) ? token : null;
+    const pathToken = rawThreadId === null && isPathMentionToken(token);
+    const isEndBoundary =
+      rawThreadId !== null
+        ? isRawThreadIdEndBoundary
+        : pathToken
+          ? isPathMentionEndBoundary
+          : isIdMentionEndBoundary;
     if (
       !(rawThreadId === null
         ? isMentionBoundary(title, match.index)
         : isRawThreadIdBoundary(title, match.index)) ||
-      !(rawThreadId === null
-        ? isMentionEndBoundary(title, matchEnd)
-        : isRawThreadIdEndBoundary(title, matchEnd)) ||
-      (rawThreadId === null &&
-        isPathMentionToken(token) &&
-        hasUnsupportedPathContinuation(title, matchEnd))
+      !isEndBoundary(title, matchEnd) ||
+      (pathToken && hasUnsupportedPathContinuation(title, matchEnd))
     ) {
       continue;
     }
