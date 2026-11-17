@@ -1003,6 +1003,151 @@ describe("MarkdownPreview thread mentions", () => {
   });
 
   it.each([
+    ["without message directives", undefined],
+    ["with message directives", ACTIVE_MESSAGE_DIRECTIVES],
+  ])(
+    "renders thread mentions followed by Korean particles as titled pills %s",
+    (_label, messageDirectives) => {
+      const threads = [
+        ["thr_ggqc89v5ya", "Skill draft"],
+        ["thr_nyc7vpduyq", "Operator session"],
+        ["thr_kym9ahe5gg", "Draft fix"],
+        ["thr_9r4c8fmn7g", "Investigation"],
+      ] as const;
+      const content = [
+        "@thread:thr_ggqc89v5ya는 사람이 직접 만든 것이 아닙니다. 원래 operator 스레드는 @thread:thr_nyc7vpduyq입니다.",
+        "수정 초안: @thread:thr_kym9ahe5gg  \n조사 스레드 @thread:thr_9r4c8fmn7g는 결과를 확인한 뒤 보관했습니다.",
+      ].join("\n\n");
+      const { container } = renderMarkdown(
+        <MarkdownPreview
+          content={content}
+          threadMentions={{ mentions: [], preserveSoftBreaks: true }}
+          messageDirectives={messageDirectives}
+        />,
+        threads.map(([id, title]) =>
+          threadResponse({
+            id,
+            projectId: "proj_target",
+            title,
+            titleFallback: title,
+          }),
+        ),
+      );
+
+      expect(
+        screen
+          .getAllByRole("link")
+          .map((link) => [link.textContent, link.getAttribute("href")]),
+      ).toEqual(
+        threads.map(([id, title]) => [
+          title,
+          `/projects/proj_target/threads/${id}`,
+        ]),
+      );
+      expect(
+        Array.from(container.querySelectorAll("p"), (p) => p.textContent),
+      ).toEqual([
+        "Skill draft는 사람이 직접 만든 것이 아닙니다. 원래 operator 스레드는 Operator session입니다.",
+        "수정 초안: Draft fix\n조사 스레드 Investigation는 결과를 확인한 뒤 보관했습니다.",
+      ]);
+    },
+  );
+
+  it.each([
+    ["a known thread", "@thread:thr_child"],
+    ["a message anchor", "@thread:thr_child#msg=42"],
+    ["an unknown thread", "@thread:thr_zzzzzzzzzz"],
+    ["a malformed thread id", "@thread:not-a-thread"],
+    ["a known raw thread id", "thr_dcwivn5n8w"],
+    ["a known raw-id inline-code span", "`thr_dcwivn5n8w`"],
+  ])(
+    "renders %s before a Korean particle as it does before a space",
+    (_label, reference) => {
+      const cachedThreads = [
+        threadResponse(),
+        threadResponse({
+          id: "thr_dcwivn5n8w",
+          projectId: "proj_target",
+          title: "Raw target",
+          titleFallback: "Raw target",
+        }),
+      ];
+      const renderedHtml = (
+        content: string,
+        messageDirectives: MarkdownMessageDirectives | undefined,
+      ) => {
+        const view = renderMarkdown(
+          <MarkdownPreview
+            content={content}
+            threadMentions={{ mentions: [], preserveSoftBreaks: true }}
+            messageDirectives={messageDirectives}
+          />,
+          cachedThreads,
+        );
+        const html = view.container.innerHTML;
+        view.unmount();
+        return html;
+      };
+
+      for (const messageDirectives of [undefined, ACTIVE_MESSAGE_DIRECTIVES]) {
+        expect(
+          renderedHtml(`See ${reference}는 done.`, messageDirectives),
+        ).toBe(
+          renderedHtml(`See ${reference} 는 done.`, messageDirectives).replace(
+            " 는",
+            "는",
+          ),
+        );
+      }
+    },
+  );
+
+  it.each([
+    ["without message directives", undefined],
+    ["with message directives", ACTIVE_MESSAGE_DIRECTIVES],
+  ])(
+    "keeps continued, coded, and linked references literal before Korean text %s",
+    (_label, messageDirectives) => {
+      const content = [
+        "@thread:thr_child/경로는",
+        "@thread:thr_child.설계는",
+        "thr_dcwivn5n8w2는",
+        "`@thread:thr_child`는",
+        "[@thread:thr_child](https://example.com)는",
+        "```\n@thread:thr_child는\n```",
+      ].join("\n\n");
+      const { container } = renderMarkdown(
+        <MarkdownPreview
+          content={content}
+          threadMentions={{ mentions: [], preserveSoftBreaks: true }}
+          messageDirectives={messageDirectives}
+        />,
+        [
+          threadResponse(),
+          threadResponse({
+            id: "thr_dcwivn5n8w",
+            projectId: "proj_target",
+            title: "Raw target",
+            titleFallback: "Raw target",
+          }),
+        ],
+      );
+
+      expect(container.textContent).not.toContain("Rebuild comments");
+      expect(container.textContent).not.toContain("Raw target");
+      expect(
+        screen.getAllByRole("link").map((link) => link.getAttribute("href")),
+      ).toEqual(["https://example.com"]);
+      expect(container.textContent).toContain("@thread:thr_child/경로는");
+      expect(container.textContent).toContain("@thread:thr_child.설계는");
+      expect(container.textContent).toContain("thr_dcwivn5n8w2는");
+      expect(container.textContent?.split("@thread:thr_child는")).toHaveLength(
+        4,
+      );
+    },
+  );
+
+  it.each([
     ["with thread mentions", { mentions: [], preserveSoftBreaks: true }],
     ["without thread mentions", undefined],
   ])(

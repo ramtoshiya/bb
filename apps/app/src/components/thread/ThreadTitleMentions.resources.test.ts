@@ -133,6 +133,11 @@ describe("resolveThreadTitleDisplayText", () => {
       `Review \u201c${rawId}.\u201d`,
       "Review \u201cRaw title target.\u201d",
     ],
+    [
+      "before a Korean particle",
+      `${rawId}\ub294 \ud655\uc778`,
+      "Raw title target\ub294 \ud655\uc778",
+    ],
   ])(
     "shows a known raw thread id %s as its title",
     (_label, title, expected) => {
@@ -144,4 +149,37 @@ describe("resolveThreadTitleDisplayText", () => {
       ).toBe(expected);
     },
   );
+});
+
+describe("resolveThreadTitleDisplayText before Korean text", () => {
+  const resources = {
+    ...EMPTY_TITLE_MENTION_RESOURCES,
+    projectNamesById: new Map([["proj_app", "App"]]),
+    threadById: new Map([
+      [
+        "thr_app",
+        makeThreadListEntry({
+          id: "thr_app",
+          projectId: "proj_app",
+          title: "Ship it",
+        }),
+      ],
+    ]),
+  };
+
+  it.each([
+    ["a thread mention", "@thread:thr_app는 확인", "Ship it는 확인"],
+    ["a project mention", "@project:proj_app에서 확인", "App에서 확인"],
+  ])(
+    "shows %s followed by a Korean particle by name",
+    (_label, title, expected) => {
+      expect(resolveThreadTitleDisplayText(title, resources)).toBe(expected);
+    },
+  );
+
+  it("keeps a directory mention followed by a Korean name literal", () => {
+    expect(resolveThreadTitleDisplayText("@docs/설계 확인", resources)).toBe(
+      "@docs/설계 확인",
+    );
+  });
 });
