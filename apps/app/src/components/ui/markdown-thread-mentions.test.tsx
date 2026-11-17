@@ -1110,6 +1110,52 @@ describe("MarkdownPreview thread mentions", () => {
     ["without message directives", undefined],
     ["with message directives", ACTIVE_MESSAGE_DIRECTIVES],
   ])(
+    "separates adjacent mentions, anchors, and attached CJK text %s",
+    (_label, messageDirectives) => {
+      const { container } = renderMarkdown(
+        <MarkdownPreview
+          content={[
+            "@thread:thr_child는 @thread:thr_child#msg=42의 결과",
+            "@thread:thr_child는#msg=42",
+            "詳細は @thread:thr_childを参照、参见 thr_dcwivn5n8w的说明",
+          ].join("\n\n")}
+          threadMentions={{ mentions: [], preserveSoftBreaks: true }}
+          messageDirectives={messageDirectives}
+        />,
+        [
+          threadResponse({ projectId: "proj_target" }),
+          threadResponse({
+            id: "thr_dcwivn5n8w",
+            projectId: "proj_target",
+            title: "Raw target",
+            titleFallback: "Raw target",
+          }),
+        ],
+      );
+
+      expect(
+        screen.getAllByRole("link").map((link) => link.getAttribute("href")),
+      ).toEqual([
+        "/projects/proj_target/threads/thr_child",
+        "/projects/proj_target/threads/thr_child#msg=42",
+        "/projects/proj_target/threads/thr_child",
+        "/projects/proj_target/threads/thr_child",
+        "/projects/proj_target/threads/thr_dcwivn5n8w",
+      ]);
+      expect(
+        Array.from(container.querySelectorAll("p"), (p) => p.textContent),
+      ).toEqual([
+        "Rebuild comments는 Rebuild comments· message의 결과",
+        "Rebuild comments는#msg=42",
+        "詳細は Rebuild commentsを参照、参见 Raw target的说明",
+      ]);
+    },
+  );
+
+  it.each([
+    ["without message directives", undefined],
+    ["with message directives", ACTIVE_MESSAGE_DIRECTIVES],
+  ])(
     "keeps continued, coded, and linked references literal before Korean text %s",
     (_label, messageDirectives) => {
       const content = [

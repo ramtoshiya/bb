@@ -24,6 +24,7 @@ import {
   type ThreadResponse,
 } from "@bb/server-contract";
 import { PromptMentionPill } from "@/components/thread/timeline/ConversationMessageMentions";
+import { isBoundedMentionToken } from "@/components/thread/mention-token-boundary";
 import { useThread } from "@/hooks/queries/thread-queries";
 import { threadQueryKey } from "@/hooks/queries/query-keys";
 import { sdk } from "@/lib/sdk";
@@ -442,57 +443,6 @@ export function ThreadTitleMentionResourcesProvider({
   );
 }
 
-export function isMentionBoundary(text: string, index: number): boolean {
-  const previous = text[index - 1];
-  return previous === undefined || !/[\p{L}\p{N}_.+-]/u.test(previous);
-}
-
-export function isRawThreadIdBoundary(text: string, index: number): boolean {
-  const previous = text[index - 1];
-  return (
-    previous !== "/" && previous !== "\\" && isMentionBoundary(text, index)
-  );
-}
-
-const PATH_MENTION_CONTINUATION = /[\p{L}\p{N}_.+\/-]/u;
-const ID_MENTION_CONTINUATION = /[A-Za-z\p{N}_.+\/-]/u;
-
-function isMentionEndBoundary(
-  text: string,
-  index: number,
-  continuation: RegExp,
-): boolean {
-  const next = text[index];
-  if (next === undefined) return true;
-  if (next === ".") {
-    const afterPeriod = text[index + 1];
-    return afterPeriod === undefined || /[\s,;:!?)}\]"'’”]/u.test(afterPeriod);
-  }
-  return !continuation.test(next);
-}
-
-function isPathMentionEndBoundary(text: string, index: number): boolean {
-  return isMentionEndBoundary(text, index, PATH_MENTION_CONTINUATION);
-}
-
-export function isIdMentionEndBoundary(text: string, index: number): boolean {
-  return isMentionEndBoundary(text, index, ID_MENTION_CONTINUATION);
-}
-
-export function isRawThreadIdEndBoundary(text: string, index: number): boolean {
-  return text[index] !== "\\" && isIdMentionEndBoundary(text, index);
-}
-
-function hasUnsupportedPathContinuation(text: string, index: number): boolean {
-  return /^\s+(?:[\p{L}\p{N}._-]+(?:\s+|\/))*[\p{L}\p{N}_-]+(?:\/|\.[\p{L}\p{N}_-]+)(?=$|[\s,;:!?)}\]])/u.test(
-    text.slice(index),
-  );
-}
-
-function isPathMentionToken(token: string): boolean {
-  return !/^@(?:thread|project|section|folder):/u.test(token);
-}
-
 function pathMentionResource(token: string): PromptMentionResource {
   const serializedPath = token.slice(1);
   const source = serializedPath.startsWith("thread-storage:")
@@ -615,23 +565,10 @@ function threadTitleTextSegments(
   while ((match = TITLE_MENTION_PATTERN.exec(title)) !== null) {
     const token = match[0];
     const matchEnd = match.index + token.length;
-    const rawThreadId = isRawThreadId(token) ? token : null;
-    const pathToken = rawThreadId === null && isPathMentionToken(token);
-    const isEndBoundary =
-      rawThreadId !== null
-        ? isRawThreadIdEndBoundary
-        : pathToken
-          ? isPathMentionEndBoundary
-          : isIdMentionEndBoundary;
-    if (
-      !(rawThreadId === null
-        ? isMentionBoundary(title, match.index)
-        : isRawThreadIdBoundary(title, match.index)) ||
-      !isEndBoundary(title, matchEnd) ||
-      (pathToken && hasUnsupportedPathContinuation(title, matchEnd))
-    ) {
+    if (!isBoundedMentionToken(title, match.index, matchEnd)) {
       continue;
     }
+    const rawThreadId = isRawThreadId(token) ? token : null;
     if (match.index > cursor) {
       segments.push({
         unresolvedThreadId: null,
