@@ -1152,6 +1152,24 @@ describe("MarkdownPreview thread mentions", () => {
     },
   );
 
+  it("keeps a mention and an unknown text directive written against it", () => {
+    const { container } = renderMarkdown(
+      <MarkdownPreview
+        content={[
+          "예시:이것@thread:thr_child는 확인",
+          ":abc@thread:thr_child",
+        ].join("\n\n")}
+        threadMentions={{ mentions: [], preserveSoftBreaks: true }}
+        messageDirectives={ACTIVE_MESSAGE_DIRECTIVES}
+      />,
+      [threadResponse({ projectId: "proj_target" })],
+    );
+
+    expect(
+      Array.from(container.querySelectorAll("p"), (p) => p.textContent),
+    ).toEqual(["예시:이것Rebuild comments는 확인", ":abcRebuild comments"]);
+  });
+
   it.each([
     ["without message directives", undefined],
     ["with message directives", ACTIVE_MESSAGE_DIRECTIVES],
